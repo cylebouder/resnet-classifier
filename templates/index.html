@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Model Image Classifier</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #70dfa2;
+            --secondary-color: #50e3b4;
+            --background-color: #faf9f5;
+            --card-background: #f0efe9;
+            --text-color: #333333;
+            --border-color: #E0E0E0;
+            --box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            min-height: 100vh;
+        }
+
+        .sidebar {
+            width: 250px;
+            background-color: var(--card-background);
+            box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .sidebar-item {
+            display: flex;
+            align-items: center;
+            padding: 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+
+        .sidebar-item:hover {
+            background-color: var(--background-color);
+            transform: translateY(-2px);
+        }
+
+        .sidebar-item.active {
+            background-color: var(--primary-color);
+            color: white;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+
+        .sidebar-item.active .sidebar-icon {
+            color: white;
+        }
+        
+        .sidebar-icon {
+            margin-right: 15px;
+            font-size: 1.5em;
+            color: var(--primary-color);
+        }
+
+        .content-container {
+            flex-grow: 1;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        header {
+            width: 100%;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            color: var(--primary-color);
+            font-weight: 700;
+        }
+
+        main {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            width: 100%;
+            max-width: 1000px;
+        }
+
+        .card {
+            background-color: var(--card-background);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: var(--box-shadow);
+            text-align: center;
+        }
+
+        .card h2 {
+            margin-top: 0;
+            color: var(--primary-color);
+        }
+        
+        .model-section {
+            display: none; /* Hide all model sections by default */
+        }
+        
+        .model-section.active {
+            display: block; /* Show the active section */
+        }
+
+        #webcam-container video {
+            width: 100%;
+            max-width: 640px;
+            height: auto;
+            background: #000;
+            border-radius: 4px;
+        }
+
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            margin: 5px;
+            transition: background-color 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #3a7bd5;
+        }
+        
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        #result-section {
+            width: 100%;
+            max-width: 600px;
+            margin-top: 20px;
+        }
+        
+        #result-section h2 {
+            color: var(--primary-color);
+        }
+
+        #result ul {
+            list-style-type: none;
+            padding: 0;
+            text-align: left;
+        }
+
+        #result li {
+            display: flex;
+            align-items: center;
+            height: 40px;
+            margin-bottom: 8px;
+            background-color: #e6f2ff;
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .bar {
+            height: 100%;
+            background-color: var(--secondary-color);
+            transition: width 0.5s ease-in-out;
+            width: 0;
+        }
+        
+        .bar-label {
+            position: absolute;
+            top: 50%;
+            left: 10px;
+            transform: translateY(-50%);
+            z-index: 2;
+            color: var(--text-color);
+            font-weight: bold;
+            white-space: nowrap;
+        }
+
+        #result li.top-result {
+            height: 50px;
+            margin-bottom: 15px;
+            background-color: #d6eaff;
+            border: 2px solid var(--primary-color);
+        }
+
+        #result li.top-result .bar-label {
+            font-size: 1.2em;
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h2 style="text-align: center;">Models</h2>
+        <div class="sidebar-item active" data-model="resnet">
+            <span class="sidebar-icon">🖼️</span> ResNet-50
+        </div>
+        <div class="sidebar-item" data-model="custom">
+            <span class="sidebar-icon">🐶</span> Dog Breeds
+        </div>
+        <div class="sidebar-item" data-model="food">
+            <span class="sidebar-icon">🍔</span> Food
+        </div>
+        <hr style="width: 100%; border: 0; border-top: 1px solid var(--border-color);">
+        <button id="stopUploads" disabled>🛑 Stop Webcam</button>
+    </div>
+
+    <div class="content-container">
+        <header>
+            <h1>Image Classifier</h1>
+        </header>
+
+        <main>
+            <section id="resnet-section" class="model-section active card">
+                <h2>ResNet-50 Model</h2>
+                <div id="upload-container">
+                    <section id="upload-section-resnet">
+                        <h3>Upload an Image 📂</h3>
+                        <form id="uploadFormResNet" enctype="multipart/form-data">
+                            <input type="file" name="file" accept="image/*">
+                            <button type="submit">Classify</button>
+                        </form>
+                    </section>
+                </div>
+                <hr>
+                <section id="webcam-section">
+                    <h3>Or use your Webcam 📸</h3>
+                    <div id="webcam-container">
+                        <video id="videoElementResNet" autoplay></video>
+                        <div>
+                            <button id="startWebcamResNet">Start Webcam</button>
+                        </div>
+                    </div>
+                </section>
+            </section>
+            
+            <section id="custom-section" class="model-section card">
+                <h2>Dog Breed Model</h2>
+                <div id="upload-container">
+                    <section id="upload-section-custom">
+                        <h3>Upload an Image 📂</h3>
+                        <form id="uploadFormCustom" enctype="multipart/form-data">
+                            <input type="file" name="file" accept="image/*">
+                            <button type="submit">Classify</button>
+                        </form>
+                    </section>
+                </div>
+                <hr>
+                <section id="webcam-section-custom">
+                    <h3>Or use your Webcam 📸</h3>
+                    <div id="webcam-container">
+                        <video id="videoElementCustom" autoplay></video>
+                        <div>
+                            <button id="startWebcamCustom">Start Webcam</button>
+                        </div>
+                    </div>
+                </section>
+            </section>
+            
+            <section id="food-section" class="model-section card">
+                <h2>Food Classifier Model</h2>
+                <div id="upload-container">
+                    <section id="upload-section-food">
+                        <h3>Upload an Image 📂</h3>
+                        <form id="uploadFormFood" enctype="multipart/form-data">
+                            <input type="file" name="file" accept="image/*">
+                            <button type="submit">Classify</button>
+                        </form>
+                    </section>
+                </div>
+                <hr>
+                <section id="webcam-section-food">
+                    <h3>Or use your Webcam 📸</h3>
+                    <div id="webcam-container">
+                        <video id="videoElementFood" autoplay></video>
+                        <div>
+                            <button id="startWebcamFood">Start Webcam</button>
+                        </div>
+                    </div>
+                </section>
+            </section>
+        </main>
+        
+        <section id="result-section" class="card">
+            <h2>Classification Results</h2>
+            <div id="result"></div>
+        </section>
+    </div>
+
+    <script>
+        const videoElementResNet = document.getElementById('videoElementResNet');
+        const videoElementCustom = document.getElementById('videoElementCustom');
+        const videoElementFood = document.getElementById('videoElementFood');
+        const canvasElement = document.createElement('canvas');
+        const sidebarItems = document.querySelectorAll('.sidebar-item');
+        const modelSections = document.querySelectorAll('.model-section');
+        const stopUploadsBtn = document.getElementById('stopUploads');
+        const resultDiv = document.getElementById('result');
+
+        const webcamButtons = {
+            'resnet': document.getElementById('startWebcamResNet'),
+            'custom': document.getElementById('startWebcamCustom'),
+            'food': document.getElementById('startWebcamFood')
+        };
+
+        const uploadForms = {
+            'resnet': document.getElementById('uploadFormResNet'),
+            'custom': document.getElementById('uploadFormCustom'),
+            'food': document.getElementById('uploadFormFood')
+        };
+
+        let intervalId;
+        let currentModel = 'resnet';
+
+        // Function to switch between models
+        function switchModel(model) {
+            // Deactivate all sections and sidebar items
+            modelSections.forEach(section => section.classList.remove('active'));
+            sidebarItems.forEach(item => item.classList.remove('active'));
+
+            // Activate the selected section and sidebar item
+            document.getElementById(`${model}-section`).classList.add('active');
+            document.querySelector(`[data-model="${model}"]`).classList.add('active');
+            
+            currentModel = model;
+            stopAutoUploads(); // Stop any active webcam streams
+        }
+
+        // Add event listeners for the sidebar items
+        sidebarItems.forEach(item => {
+            item.addEventListener('click', () => {
+                const model = item.dataset.model;
+                switchModel(model);
+            });
+        });
+
+        // Function to display results
+        function displayResults(data) {
+            let totalConfidence = 0;
+            data.classifications.forEach(item => {
+                const probability = parseFloat(item.probability);
+                if (!isNaN(probability) && probability >= 0) {
+                    totalConfidence += probability;
+                }
+            });
+
+            let listItems = '';
+            
+            const sortedClassifications = data.classifications.sort((a, b) => {
+                const probA = parseFloat(a.probability) || 0;
+                const probB = parseFloat(b.probability) || 0;
+                return probB - probA;
+            });
+
+            sortedClassifications.forEach((item, index) => {
+                const probability = parseFloat(item.probability);
+                let normalizedPercent = 0;
+                if (totalConfidence > 0) {
+                    normalizedPercent = (probability / totalConfidence) * 100;
+                }
+
+                const percentageToDisplay = normalizedPercent.toFixed(2);
+                const barWidth = percentageToDisplay;
+                const listItemClass = index === 0 ? 'top-result' : '';
+                
+                listItems += `
+                    <li class="${listItemClass}">
+                        <div class="bar" style="width: ${barWidth}%;"></div>
+                        <span class="bar-label"><strong>${item.label}</strong>: ${percentageToDisplay}%</span>
+                    </li>
+                `;
+            });
+
+            resultDiv.innerHTML = `<ul>${listItems}</ul>`;
+        }
+
+        async function captureAndUpload(endpoint, videoElementToUse) {
+            canvasElement.width = videoElementToUse.videoWidth;
+            canvasElement.height = videoElementToUse.videoHeight;
+            const context = canvasElement.getContext('2d');
+            context.drawImage(videoElementToUse, 0, 0, videoElementToUse.videoWidth, videoElementToUse.videoHeight);
+
+            canvasElement.toBlob(async (blob) => {
+                const formData = new FormData();
+                formData.append('file', blob, 'webcam_photo.jpg');
+
+                try {
+                    const response = await fetch(endpoint, {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        displayResults(data);
+                    } else {
+                        resultDiv.innerHTML = `<h2>Error: ${data.error}</h2>`;
+                        stopAutoUploads();
+                    }
+                } catch (error) {
+                    resultDiv.innerHTML = '<h2>An error occurred during classification.</h2>';
+                    console.error('Error:', error);
+                    stopAutoUploads();
+                }
+            }, 'image/jpeg');
+        }
+
+        function stopAutoUploads() {
+            clearInterval(intervalId);
+            document.querySelectorAll('video').forEach(video => {
+                if (video.srcObject) {
+                    video.srcObject.getTracks().forEach(track => track.stop());
+                    video.srcObject = null;
+                }
+            });
+            
+            // Enable all start buttons and disable stop button
+            Object.values(webcamButtons).forEach(btn => btn.disabled = false);
+            stopUploadsBtn.disabled = true;
+            resultDiv.innerHTML = '<h2>Uploads Stopped.</h2>';
+        }
+
+        stopUploadsBtn.addEventListener('click', stopAutoUploads);
+
+        // Event listeners for webcam buttons
+        webcamButtons['resnet'].addEventListener('click', async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                videoElementResNet.srcObject = stream;
+                Object.values(webcamButtons).forEach(btn => btn.disabled = true);
+                stopUploadsBtn.disabled = false;
+                resultDiv.innerHTML = '<h2>Starting automatic uploads to ResNet...</h2>';
+                intervalId = setInterval(() => captureAndUpload('/upload', videoElementResNet), 1000);
+            } catch (err) {
+                console.error("Error accessing the webcam: ", err);
+                resultDiv.innerHTML = '<h2>Could not access webcam. Please check permissions.</h2>';
+            }
+        });
+
+        webcamButtons['custom'].addEventListener('click', async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                videoElementCustom.srcObject = stream;
+                Object.values(webcamButtons).forEach(btn => btn.disabled = true);
+                stopUploadsBtn.disabled = false;
+                resultDiv.innerHTML = '<h2>Starting automatic uploads to Custom Dog Model...</h2>';
+                intervalId = setInterval(() => captureAndUpload('/classify_custom', videoElementCustom), 1000);
+            } catch (err) {
+                console.error("Error accessing the webcam: ", err);
+                resultDiv.innerHTML = '<h2>Could not access webcam. Please check permissions.</h2>';
+            }
+        });
+
+        webcamButtons['food'].addEventListener('click', async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                videoElementFood.srcObject = stream;
+                Object.values(webcamButtons).forEach(btn => btn.disabled = true);
+                stopUploadsBtn.disabled = false;
+                resultDiv.innerHTML = '<h2>Starting automatic uploads to Food Model...</h2>';
+                intervalId = setInterval(() => captureAndUpload('/classify_food', videoElementFood), 1000);
+            } catch (err) {
+                console.error("Error accessing the webcam: ", err);
+                resultDiv.innerHTML = '<h2>Could not access webcam. Please check permissions.</h2>';
+            }
+        });
+
+        // Event listeners for file upload forms
+        uploadForms['resnet'].addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fileInput = uploadForms['resnet'].querySelector('input[type="file"]');
+            if (fileInput.files.length === 0) {
+                resultDiv.innerHTML = '<h2 style="color:red">Please select a file to upload!</h2>';
+                return;
+            }
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            resultDiv.innerHTML = '<h2>Classifying with ResNet...</h2>';
+            try {
+                const response = await fetch('/upload', { method: 'POST', body: formData });
+                const data = await response.json();
+                if (data.success) {
+                    displayResults(data);
+                } else {
+                    resultDiv.innerHTML = `<h2>Error: ${data.error}</h2>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = '<h2>An error occurred during ResNet classification.</h2>';
+                console.error('Error:', error);
+            }
+        });
+
+        uploadForms['custom'].addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fileInput = uploadForms['custom'].querySelector('input[type="file"]');
+            if (fileInput.files.length === 0) {
+                resultDiv.innerHTML = '<h2 style="color:red">Please select a file to upload!</h2>';
+                return;
+            }
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            resultDiv.innerHTML = '<h2>Classifying with Custom Model...</h2>';
+            try {
+                const response = await fetch('/classify_custom', { method: 'POST', body: formData });
+                const data = await response.json();
+                if (data.success) {
+                    displayResults(data);
+                } else {
+                    resultDiv.innerHTML = `<h2>Error: ${data.error}</h2>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = '<h2>An error occurred during custom classification.</h2>';
+                console.error('Error:', error);
+            }
+        });
+
+        uploadForms['food'].addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fileInput = uploadForms['food'].querySelector('input[type="file"]');
+            if (fileInput.files.length === 0) {
+                resultDiv.innerHTML = '<h2 style="color:red">Please select a file to upload!</h2>';
+                return;
+            }
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            resultDiv.innerHTML = '<h2>Classifying with Food Model...</h2>';
+            try {
+                const response = await fetch('/classify_food', { method: 'POST', body: formData });
+                const data = await response.json();
+                if (data.success) {
+                    displayResults(data);
+                } else {
+                    resultDiv.innerHTML = `<h2>Error: ${data.error}</h2>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = '<h2>An error occurred during food classification.</h2>';
+                console.error('Error:', error);
+            }
+        });
+    </script>
+</body>
+</html>
