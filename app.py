@@ -69,29 +69,36 @@ imagenet_labels, dog_labels, food_labels = load_labels()
 
 tab1, tab2, tab3 = st.tabs(["General (ResNet-50)", "Dog Breeds", "Food"])
 
+def image_input(tab_key):
+    """Returns a PIL Image from either file upload or webcam, whichever is provided."""
+    col1, col2 = st.columns(2)
+    with col1:
+        uploaded = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"], key=f"upload_{tab_key}")
+    with col2:
+        captured = st.camera_input("Or use your webcam", key=f"cam_{tab_key}")
+    source = captured if captured is not None else uploaded
+    return Image.open(source) if source else None
+
 with tab1:
     st.caption("Pretrained on ImageNet — recognizes 1,000 everyday objects.")
-    f = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"], key="r")
-    if f:
-        img = Image.open(f)
+    img = image_input("r")
+    if img:
         st.image(img, width=320)
         with st.spinner("Classifying..."):
             show_results(classify(img, resnet_model, imagenet_labels))
 
 with tab2:
     st.caption("Fine-tuned on 37 dog breeds.")
-    f = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"], key="d")
-    if f:
-        img = Image.open(f)
+    img = image_input("d")
+    if img:
         st.image(img, width=320)
         with st.spinner("Classifying..."):
             show_results(classify(img, dog_model, dog_labels))
 
 with tab3:
     st.caption("Fine-tuned on 101 food categories.")
-    f = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"], key="f")
-    if f:
-        img = Image.open(f)
+    img = image_input("f")
+    if img:
         st.image(img, width=320)
         with st.spinner("Classifying..."):
             show_results(classify(img, food_model, food_labels))
