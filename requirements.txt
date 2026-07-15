@@ -1,4 +1,4 @@
-gradio
+streamlit
 pillow
 tqdm
 --extra-index-url https://download.pytorch.org/whl/cpu

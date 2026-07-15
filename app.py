@@ -1,25 +1,41 @@
+import streamlit as st
 import torch
 import torchvision.transforms as transforms
 import torchvision.models as models
 from PIL import Image
-import gradio as gr
 from dog_training import make_dog_model
 from food_training import make_food_model
 
-# ── load models ───────────────────────────────────────────────────────────────
+st.set_page_config(page_title="Image Classifier", page_icon="🔍", layout="centered")
 
-resnet_model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
-resnet_model.eval()
+# ── load models (cached — only runs once) ────────────────────────────────────
 
-custom_model = make_dog_model()
-custom_model.load_state_dict(torch.load('model_saver/best_model.pth', map_location='cpu'))
-custom_model.eval()
+@st.cache_resource
+def load_models():
+    resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
+    resnet.eval()
 
-food_model = make_food_model()
-food_model.load_state_dict(torch.load('model_saver/best_food.pth', map_location='cpu'))
-food_model.eval()
+    dog = make_dog_model()
+    dog.load_state_dict(torch.load('model_saver/best_model.pth', map_location='cpu'))
+    dog.eval()
 
-# ── preprocessing ─────────────────────────────────────────────────────────────
+    food = make_food_model()
+    food.load_state_dict(torch.load('model_saver/best_food.pth', map_location='cpu'))
+    food.eval()
+
+    return resnet, dog, food
+
+@st.cache_data
+def load_labels():
+    with open("imagenet_classes.txt") as f:
+        imagenet = [s.strip() for s in f.readlines()]
+    with open("dog_labels.txt") as f:
+        dogs = [s.strip() for s in f.readlines()]
+    with open("food101_labels.txt") as f:
+        food = [s.strip() for s in f.readlines()]
+    return imagenet, dogs, food
+
+# ── inference ─────────────────────────────────────────────────────────────────
 
 preprocess = transforms.Compose([
     transforms.Resize(256),
@@ -28,17 +44,6 @@ preprocess = transforms.Compose([
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
 ])
 
-# ── labels ────────────────────────────────────────────────────────────────────
-
-with open("imagenet_classes.txt") as f:
-    imagenet_labels = [s.strip() for s in f.readlines()]
-with open("dog_labels.txt") as f:
-    dog_labels = [s.strip() for s in f.readlines()]
-with open("food101_labels.txt") as f:
-    food_labels = [s.strip() for s in f.readlines()]
-
-# ── inference ─────────────────────────────────────────────────────────────────
-
 def classify(image, model, labels):
     img = preprocess(image.convert("RGB"))
     batch = torch.unsqueeze(img, 0)
@@ -46,45 +51,47 @@ def classify(image, model, labels):
         output = model(batch)
     probs = torch.nn.functional.softmax(output[0], dim=0)
     top_probs, top_ids = torch.topk(probs, 5)
-    return {labels[i.item()]: float(p) for i, p in zip(top_ids, top_probs)}
+    return [(labels[i.item()], float(p)) for i, p in zip(top_ids, top_probs)]
 
-def classify_resnet(image):
-    return classify(image, resnet_model, imagenet_labels)
+def show_results(results):
+    for label, prob in results:
+        col1, col2 = st.columns([4, 1])
+        col1.progress(prob, text=label)
+        col2.markdown(f"**{prob*100:.1f}%**")
 
-def classify_dog(image):
-    return classify(image, custom_model, dog_labels)
+# ── ui ────────────────────────────────────────────────────────────────────────
 
-def classify_food(image):
-    return classify(image, food_model, food_labels)
+st.title("Multi-Model Image Classifier")
+st.caption("Three ResNet-50 models — general objects, dog breeds, and food.")
 
-# ── interface ─────────────────────────────────────────────────────────────────
+resnet_model, dog_model, food_model = load_models()
+imagenet_labels, dog_labels, food_labels = load_labels()
 
-with gr.Blocks(title="Multi-Model Image Classifier") as demo:
-    gr.Markdown("""
-# Multi-Model Image Classifier
-Upload a photo or use your webcam. Switch between models using the tabs.
-""")
+tab1, tab2, tab3 = st.tabs(["General (ResNet-50)", "Dog Breeds", "Food"])
 
-    with gr.Tabs():
-        with gr.Tab("ResNet-50 — General"):
-            gr.Markdown("Pretrained on ImageNet — recognizes 1,000 everyday objects.")
-            with gr.Row():
-                img_r = gr.Image(type="pil", sources=["upload", "webcam"], label="Image")
-                out_r = gr.Label(num_top_classes=5, label="Top 5 predictions")
-            gr.Button("Classify").click(classify_resnet, inputs=img_r, outputs=out_r)
+with tab1:
+    st.caption("Pretrained on ImageNet — recognizes 1,000 everyday objects.")
+    f = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"], key="r")
+    if f:
+        img = Image.open(f)
+        st.image(img, width=320)
+        with st.spinner("Classifying..."):
+            show_results(classify(img, resnet_model, imagenet_labels))
 
-        with gr.Tab("Dog Breeds"):
-            gr.Markdown("Fine-tuned ResNet-50 — identifies 37 dog breeds.")
-            with gr.Row():
-                img_d = gr.Image(type="pil", sources=["upload", "webcam"], label="Image")
-                out_d = gr.Label(num_top_classes=5, label="Top 5 predictions")
-            gr.Button("Classify").click(classify_dog, inputs=img_d, outputs=out_d)
+with tab2:
+    st.caption("Fine-tuned on 37 dog breeds.")
+    f = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"], key="d")
+    if f:
+        img = Image.open(f)
+        st.image(img, width=320)
+        with st.spinner("Classifying..."):
+            show_results(classify(img, dog_model, dog_labels))
 
-        with gr.Tab("Food"):
-            gr.Markdown("Fine-tuned ResNet-50 — classifies 101 food categories.")
-            with gr.Row():
-                img_f = gr.Image(type="pil", sources=["upload", "webcam"], label="Image")
-                out_f = gr.Label(num_top_classes=5, label="Top 5 predictions")
-            gr.Button("Classify").click(classify_food, inputs=img_f, outputs=out_f)
-
-demo.launch()
+with tab3:
+    st.caption("Fine-tuned on 101 food categories.")
+    f = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"], key="f")
+    if f:
+        img = Image.open(f)
+        st.image(img, width=320)
+        with st.spinner("Classifying..."):
+            show_results(classify(img, food_model, food_labels))
