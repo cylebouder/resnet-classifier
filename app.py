@@ -1,37 +1,26 @@
-import os
-from flask import Flask, render_template, request, jsonify
-from PIL import Image
 import torch
 import torchvision.transforms as transforms
 import torchvision.models as models
+from PIL import Image
+import gradio as gr
 from dog_training import make_dog_model
-from food_training import make_food_model  # Assuming make_model is defined in training.py
+from food_training import make_food_model
 
-app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'static'
+# ── load models ───────────────────────────────────────────────────────────────
 
-# --- Load both classification models ---
-
-# Load the pre-trained ResNet-50 model
 resnet_model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
 resnet_model.eval()
 
-# Load your customhttp://127.0.0.1:6777-trained model
-# Load your custom-trained model
 custom_model = make_dog_model()
-# Make sure your custom model's weights file is in the 'model_saver' directory
-custom_model.load_state_dict(torch.load('model_saver/best_model.pth', map_location=torch.device('cpu')))
+custom_model.load_state_dict(torch.load('model_saver/best_model.pth', map_location='cpu'))
 custom_model.eval()
 
 food_model = make_food_model()
-food_model.load_state_dict(torch.load('model_saver/best_food.pth', map_location=torch.device('cpu')))
+food_model.load_state_dict(torch.load('model_saver/best_food.pth', map_location='cpu'))
 food_model.eval()
 
+# ── preprocessing ─────────────────────────────────────────────────────────────
 
-
-# --- Pre-processing and categories (assumed to be the same for both models) ---
-
-# Pre-processing transformations for the images
 preprocess = transforms.Compose([
     transforms.Resize(256),
     transforms.CenterCrop(224),
@@ -39,147 +28,63 @@ preprocess = transforms.Compose([
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
 ])
 
-# Get the ImageNet class names
-with open("imagenet_classes.txt", "r") as f:
-    categories = [s.strip() for s in f.readlines()]
-with open ('dog_labels.txt', 'r') as f:
-    dog_categories = [s.strip() for s in f.readlines()] 
-with open ('food101_labels.txt', 'r') as f:
-    food_categories = [s.strip() for s in f.readlines()] 
+# ── labels ────────────────────────────────────────────────────────────────────
 
-# --- Flask routes ---
+with open("imagenet_classes.txt") as f:
+    imagenet_labels = [s.strip() for s in f.readlines()]
+with open("dog_labels.txt") as f:
+    dog_labels = [s.strip() for s in f.readlines()]
+with open("food101_labels.txt") as f:
+    food_labels = [s.strip() for s in f.readlines()]
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+# ── inference ─────────────────────────────────────────────────────────────────
 
-@app.route('/upload', methods=['POST'])
-def classify_resnet():
-    """Endpoint to classify an image using the ResNet-50 model."""
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
-    
-    file = request.files['file']
-    
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
-    
-    if file:
-        filename = "uploaded_image_resnet.jpg"
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-        
-        img = Image.open(filepath)
-        img_preprocessed = preprocess(img)
-        batch = torch.unsqueeze(img_preprocessed, 0)
-        
-        # Classify with the ResNet model
-        with torch.no_grad():
-            prediction = resnet_model(batch)
-        
-        # Get the top 5 classification results
-        probabilities = torch.nn.functional.softmax(prediction[0], dim=0)
-        top_probs, top_catids = torch.topk(probabilities, 5)
-        
-        # Create a list of dictionaries for the results
-        results_list = []
-        for prob, catid in zip(top_probs, top_catids):
-            results_list.append({
-                'label': categories[catid.item()],
-                'probability': f"{prob.item()*100:.2f}%"
-            })
-        
-        return jsonify({
-            'success': True,
-            'image_path': os.path.join(app.config['UPLOAD_FOLDER'], filename),
-            'classifications': results_list
-        })
+def classify(image, model, labels):
+    img = preprocess(image.convert("RGB"))
+    batch = torch.unsqueeze(img, 0)
+    with torch.no_grad():
+        output = model(batch)
+    probs = torch.nn.functional.softmax(output[0], dim=0)
+    top_probs, top_ids = torch.topk(probs, 5)
+    return {labels[i.item()]: float(p) for i, p in zip(top_ids, top_probs)}
 
-@app.route('/classify_custom', methods=['POST'])
-def classify_custom_model():
-    """Endpoint to classify an image using the custom-trained model."""
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
-    
-    file = request.files['file']
-    
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
-    
-    if file:
-        filename = "uploaded_image_custom.jpg"
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-        
-        img = Image.open(filepath)
-        img_preprocessed = preprocess(img)
-        batch = torch.unsqueeze(img_preprocessed, 0)
-        
-        # Classify with the custom model
-        with torch.no_grad():
-            prediction = custom_model(batch)
-        
-        # Get the top 5 classification results
-        probabilities = torch.nn.functional.softmax(prediction[0], dim=0)
-        top_probs, top_catids = torch.topk(probabilities, 5)
+def classify_resnet(image):
+    return classify(image, resnet_model, imagenet_labels)
 
-        # Create a list of dictionaries for the results
-        results_list = []
-        for prob, catid in zip(top_probs, top_catids):
-            results_list.append({
-                'label': dog_categories[catid.item()],
-                'probability': f"{prob.item()*100:.2f}%"
-            })
-        
-        return jsonify({
-            'success': True,
-            'image_path': os.path.join(app.config['UPLOAD_FOLDER'], filename),
-            'classifications': results_list
-        })
-    
-@app.route('/classify_food', methods=['POST'])
-def classify_food_model():
-    """Endpoint to classify an image using the custom-trained model."""
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
-    
-    file = request.files['file']
-    
-    if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
-    
-    if file:
-        filename = "uploaded_image_food.jpg"
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-        
-        img = Image.open(filepath)
-        img_preprocessed = preprocess(img)
-        batch = torch.unsqueeze(img_preprocessed, 0)
-        
-        # Classify with the custom model
-        with torch.no_grad():
-            prediction = food_model(batch)
-        
-        # Get the top 5 classification results
-        probabilities = torch.nn.functional.softmax(prediction[0], dim=0)
-        top_probs, top_catids = torch.topk(probabilities, 5)
+def classify_dog(image):
+    return classify(image, custom_model, dog_labels)
 
-        # Create a list of dictionaries for the results
-        results_list = []
-        for prob, catid in zip(top_probs, top_catids):
-            results_list.append({
-                'label': food_categories[catid.item()],
-                'probability': f"{prob.item()*100:.2f}%"
-            })
-        
-        return jsonify({
-            'success': True,
-            'image_path': os.path.join(app.config['UPLOAD_FOLDER'], filename),
-            'classifications': results_list
-        })
-    
-if __name__ == '__main__':
-    if not os.path.exists('static'):
-        os.makedirs('static')
-    app.run(debug=True, port="3000", host="0.0.0.0", use_reloader=False)
+def classify_food(image):
+    return classify(image, food_model, food_labels)
+
+# ── interface ─────────────────────────────────────────────────────────────────
+
+with gr.Blocks(title="Multi-Model Image Classifier") as demo:
+    gr.Markdown("""
+# Multi-Model Image Classifier
+Upload a photo or use your webcam. Switch between models using the tabs.
+""")
+
+    with gr.Tabs():
+        with gr.Tab("ResNet-50 — General"):
+            gr.Markdown("Pretrained on ImageNet — recognizes 1,000 everyday objects.")
+            with gr.Row():
+                img_r = gr.Image(type="pil", sources=["upload", "webcam"], label="Image")
+                out_r = gr.Label(num_top_classes=5, label="Top 5 predictions")
+            gr.Button("Classify").click(classify_resnet, inputs=img_r, outputs=out_r)
+
+        with gr.Tab("Dog Breeds"):
+            gr.Markdown("Fine-tuned ResNet-50 — identifies 37 dog breeds.")
+            with gr.Row():
+                img_d = gr.Image(type="pil", sources=["upload", "webcam"], label="Image")
+                out_d = gr.Label(num_top_classes=5, label="Top 5 predictions")
+            gr.Button("Classify").click(classify_dog, inputs=img_d, outputs=out_d)
+
+        with gr.Tab("Food"):
+            gr.Markdown("Fine-tuned ResNet-50 — classifies 101 food categories.")
+            with gr.Row():
+                img_f = gr.Image(type="pil", sources=["upload", "webcam"], label="Image")
+                out_f = gr.Label(num_top_classes=5, label="Top 5 predictions")
+            gr.Button("Classify").click(classify_food, inputs=img_f, outputs=out_f)
+
+demo.launch()
